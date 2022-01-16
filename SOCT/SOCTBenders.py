@@ -79,11 +79,12 @@ class SOCTBenders(ClassifierMixin, BaseEstimator):
             master.Params.MIPGap = self.mip_gap
         if self.time_limit is not None:
             master.Params.TimeLimit = self.time_limit
-        master.Params.Heuristics = 0.5 # To find incumbents quicker
         
         # Pack data into model
         master._X_y = X, y
         master._nodes = (branch_nodes, leaf_nodes)
+        master._callback_calls = 0
+        master._callback_time = 0
         
         # Variables
         c = master.addVars(classes, leaf_nodes, lb=0, ub=1)
@@ -99,7 +100,8 @@ class SOCTBenders(ClassifierMixin, BaseEstimator):
         master._vars = (c, d, w, z)
         
         # Objective
-        master.setObjective((N-z.sum())/N + self.ccp_alpha*d.sum(), GRB.MINIMIZE)
+        #master.setObjective((N-z.sum())/N + self.ccp_alpha*d.sum(), GRB.MINIMIZE)
+        master.setObjective(-z.sum()/N + self.ccp_alpha*d.sum(), GRB.MINIMIZE)
         
         # Constraints
         master.addConstrs((w[i,1] == 1 for i in range(N)))
@@ -117,8 +119,6 @@ class SOCTBenders(ClassifierMixin, BaseEstimator):
         master._iis_counter = np.zeros(N)
         
         # Solve model
-        master._best_obj = 1 + self.ccp_alpha*len(branch_nodes)
-        master._last_incumbent_update = time.time()
         master.optimize(SOCTBenders._callback)
         
         # Find splits for branch nodes and define classification rules at the leaf nodes
@@ -176,17 +176,11 @@ class SOCTBenders(ClassifierMixin, BaseEstimator):
             objbnd = model.cbGet(GRB.Callback.MIP_OBJBND)
             X, y = model._X_y
             N, p = np.shape(X)
-            # When alpha=0, if this is true, then the incumbent is optimal
             if abs(objbst - objbnd) < 1/N:
                 model.terminate()
-            """
-            if objbst < model._best_obj - 1e-5:
-                model._best_obj = objbst
-                model._last_incumbent_update = time.time()
-            if time.time() - model._last_incumbent_update > 60:
-                model.terminate()
-            """
         if where == GRB.Callback.MIPSOL:
+            start_time = time.time()
+            
             # Extract variables and data from model
             (c, d, w, z) = model._vars
             d_vals = model.cbGetSolution(d)
@@ -226,6 +220,9 @@ class SOCTBenders(ClassifierMixin, BaseEstimator):
                     cut_lhs.add(w[i,2*t+1])
                 cut_rhs = len(left_support) + len(right_support) - 1
                 model.cbLazy(cut_lhs <= cut_rhs)
+            
+            model._callback_calls += 1
+            model._callback_time += time.time() - start_time
     
     @staticmethod
     def _find_iis(X, left_index_set, right_index_set, datapoint_weights=None):

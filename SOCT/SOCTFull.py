@@ -1,4 +1,3 @@
-import time
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, ClassifierMixin
@@ -103,7 +102,8 @@ class SOCTFull(ClassifierMixin, BaseEstimator):
         model._vars = (c, d, w, z, a, a_abs, b)
         
         # Objective
-        model.setObjective((N-z.sum())/N + self.ccp_alpha*d.sum(), GRB.MINIMIZE)
+        #model.setObjective((N-z.sum())/N + self.ccp_alpha*d.sum(), GRB.MINIMIZE)
+        model.setObjective(-z.sum()/N + self.ccp_alpha*d.sum(), GRB.MINIMIZE)
         
         # Constraints
         model.addConstrs((w[i,1] == 1 for i in range(N)))
@@ -124,8 +124,6 @@ class SOCTFull(ClassifierMixin, BaseEstimator):
             self._warm_start()
         
         # Solve model
-        model._best_obj = 1 + self.ccp_alpha*len(branch_nodes)
-        model._last_incumbent_update = time.time()
         model.optimize(SOCTFull._callback)
         
         # Find splits for branch nodes and define classification rules at the leaf nodes
@@ -194,16 +192,8 @@ class SOCTFull(ClassifierMixin, BaseEstimator):
             objbnd = model.cbGet(GRB.Callback.MIP_OBJBND)
             X, y = model._X_y
             N, p = np.shape(X)
-            # When alpha=0, if this is true, then the incumbent is optimal
             if abs(objbst - objbnd) < 1/N:
                 model.terminate()
-            """
-            if objbst < model._best_obj - 1e-5:
-                model._best_obj = objbst
-                model._last_incumbent_update = time.time()
-            if time.time() - model._last_incumbent_update > 60:
-                model.terminate()
-            """
     
     def _construct_decision_tree(self):
         """ After initial MIP training, define the learned decision tree. """
