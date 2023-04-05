@@ -1,155 +1,154 @@
-import math
+import warnings
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_is_fitted
 from sklearn.preprocessing import KBinsDiscretizer, MinMaxScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
-from sklearn.datasets import load_iris, load_wine, load_breast_cancer
 
-class CandidateThresholdBinarizer(TransformerMixin, BaseEstimator):
-    """ Binarize continuous data using candidate thresholds.
+class Bucketizer(TransformerMixin, BaseEstimator):
+    """Bucketize numerical features.
     
-    For each feature, sort observations by values of that feature, then find
-    pairs of consecutive observations that have different class labels and
-    different feature values, and define a candidate threshold as the average of
-    these two observations’ feature values.
+    For each feature, sort samples according to that feature. For each
+    pair of consecutive samples with different class labels and
+    different feature values, define a candidate threshold for a split
+    as the average of these two observations’ feature values.
     
     Attributes
     ----------
-    candidate_thresholds_ : dict mapping features to list of thresholds
+    thresholds_ : dict
+        Dictionary mapping features to list of thresholds.
     """
-    
     def fit(self, X, y):
-        """ Finds all candidate split thresholds for each feature.
+        """Finds all candidate split thresholds for each feature.
         
         Parameters
         ----------
-        X : pandas DataFrame with observations, X.columns used as feature names
-        y : pandas Series with labels
+        X : pandas DataFrame of shape (n_samples, n_features)
+            The feature vectors to be bucketized.
+        
+        y : pandas Series of shape (n_samples,)
+            The target values (class labels).
         
         Returns
         -------
-        self
+        self : Bucketizer
+            Fitted bucketizer.
         """
+        if y.name is None:
+            y.name = 'labels'
         X_y = X.join(y)
-        self.candidate_thresholds_ = {}
+        self.thresholds_ = {}
         for j in X.columns:
             thresholds = []
-            sorted_X_y = X_y.sort_values([j, y.name]) # Sort by feature value, then by label
-            prev_feature_val, prev_label = sorted_X_y.iloc[0][j], sorted_X_y.iloc[0][y.name]
-            for idx,row in sorted_X_y.iterrows():
+            sorted_X_y = X_y.sort_values([j, y.name])
+            prev_feature_val = sorted_X_y.iloc[0][j]
+            prev_label = sorted_X_y.iloc[0][y.name]
+            for idx, row in sorted_X_y.iterrows():
                 curr_feature_val, curr_label = row[j], row[y.name]
-                if (curr_label != prev_label and
-                        not math.isclose(curr_feature_val, prev_feature_val)):
+                if (curr_label != prev_label
+                    and prev_feature_val < curr_feature_val):
                     thresh = (prev_feature_val + curr_feature_val)/2
                     thresholds.append(thresh)
                 prev_feature_val, prev_label = curr_feature_val, curr_label
-            self.candidate_thresholds_[j] = thresholds
+            self.thresholds_[j] = thresholds
         return self
     
     def transform(self, X):
-        """ Binarize numerical features using candidate thresholds.
+        """Perform bucketization using candidate thresholds.
         
         Parameters
         ----------
-        X : pandas DataFrame with observations, X.columns used as feature names
+        X : pandas DataFrame of shape (n_samples, n_features)
+            The feature vectors to be bucketized.
         
         Returns
         -------
-        Xb : pandas DataFrame that is the result of binarizing X
+        Xt : pandas DataFrame
+            Transformed data.
         """
         check_is_fitted(self)
-        Xb = pd.DataFrame()
+        Xt = {}
         for j in X.columns:
-            for threshold in self.candidate_thresholds_[j]:
-                binary_test_name = "X[{}] <= {}".format(j, threshold)
-                Xb[binary_test_name] = (X[j] <= threshold)
-        return Xb
+            for threshold in self.thresholds_[j]:
+                Xt[f"X[{j}] <= {threshold}"] = (X[j] <= threshold)
+        Xt = pd.DataFrame(Xt)
+        return Xt
 
-def preprocess_dataset(X_train, X_test, y_train=None, numerical_features=None, categorical_features=None, binarization=None):
-    """ Preprocess a dataset.
+class QuantileBucketizer(TransformerMixin, BaseEstimator):
+    """Bucketize numerical features using quantiles.
     
-    Numerical features are scaled to the [0,1] interval by default, but can also
-    be binarized, either by considering all candidate thresholds for a
-    univariate split, or by binning. Categorical features are one-hot encoded.
+    Internally use scikit-learn's KBinsDiscretizer, with the
+    modification that for each feature, bins to the left of the bin
+    containing the feature value are also filled with ones. Thus,
+    transformed features correspond to threshold tests.
     
     Parameters
     ----------
-    X_train
-    X_test
-    y_train : pandas Series of training labels, only needed for binarization
-        with candidate thresholds
-    numerical_features : list of numerical features
-    categorical_features : list of categorical features
-    binarization : {'all-candidates', 'binning'}, default=None
-        Binarization technique for numerical features.
-        all-candidates
-            Use all candidate thresholds.
-        binning
-            Perform binning using scikit-learn's KBinsDiscretizer.
-        None
-            No binarization is performed, features scaled to the [0,1] interval.
+    n_quantiles : positive int, default=5
+        The number of quantiles.
     
-    Returns
-    -------
-    X_train_new : pandas DataFrame that is the result of binarizing X
+    Attributes
+    ----------
+    discretizer_ : KBinsDiscretizer
+        KBinsDiscretizer instance.
     """
-    if numerical_features is None:
-        numerical_features = []
-    if categorical_features is None:
-        categorical_features = []
+    def __init__(
+        self,
+        n_quantiles=5
+    ):
+        self.n_quantiles = n_quantiles
     
-    numerical_transformer = MinMaxScaler()
-    if binarization == 'all-candidates':
-        numerical_transformer = CandidateThresholdBinarizer()
-    elif binarization == 'binning':
-        numerical_transformer = KBinsDiscretizer(encode='onehot-dense')
-    #categorical_transformer = OneHotEncoder(drop='if_binary', sparse=False, handle_unknown='ignore') # Should work in scikit-learn 1.0
-    categorical_transformer = OneHotEncoder(sparse=False, handle_unknown='ignore')
-    ct = ColumnTransformer([("num", numerical_transformer, numerical_features),
-                            ("cat", categorical_transformer, categorical_features)])
-    X_train_new = ct.fit_transform(X_train, y_train)
-    X_test_new = ct.transform(X_test)
+    def fit(self, X, y=None):
+        """Fit a KBinsDiscretizer to the data.
+        
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            The feature vectors to be bucketized.
+        
+        y : None
+            Ignored.
+        
+        Returns
+        -------
+        self : QuantileBucketizer
+            Fitted bucketizer.
+        """
+        warnings.filterwarnings('ignore')
+        
+        self.discretizer_ = KBinsDiscretizer(n_bins=self.n_quantiles, encode='onehot-dense')
+        self.discretizer_.fit(X)
+        return self
     
-    return X_train_new, X_test_new
-
-################################################################################
-# Functions for loading datasets from files into pandas DataFrames and Series
-################################################################################
-
-def load_acute_inflammations(decision_number):
-    """ Load the Acute Inflammations dataset.
-    
-    Contains a mix of numerical and categorical attributes. Decided to not use
-    this dataset in the paper for this reason.
-    
-    https://archive.ics.uci.edu/ml/datasets/Acute+Inflammations
-    """
-    if decision_number not in [1, 2]:
-        raise ValueError("problem_number must be 1 or 2")
-    df = pd.read_csv("datasets/diagnosis.data",
-            names=["a1","a2","a3","a4","a5","a6","d1","d2"], decimal=',',
-            encoding='utf-16', delim_whitespace=True)
-    y = df["d{}".format(decision_number)]
-    X = df.drop(columns=["d1","d2"])
-    return X, y
-
-def load_acute_inflammations_1():
-    """ Load the Acute Inflammations dataset with decision 1 as the label.
-    
-    Contains a mix of numerical and categorical attributes.
-    """
-    return load_acute_inflammations(1)
-
-def load_acute_inflammations_2():
-    """ Load the Acute Inflammations dataset with decision 1 as the label.
-    
-    Contains a mix of numerical and categorical attributes.
-    """
-    return load_acute_inflammations(2)
+    def transform(self, X):
+        """Perform bucketization using quantiles.
+        
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            The feature vectors to be bucketized.
+        
+        Returns
+        -------
+        Xt : ndarray
+            Transformed data.
+        """
+        check_is_fitted(self)
+        Xt = self.discretizer_.transform(X)
+        for x in Xt:
+            j = 0
+            for n in self.discretizer_.n_bins_:
+                saw_one = False
+                for _ in range(n):
+                    if x[j]:
+                        saw_one = True
+                    if not saw_one:
+                        x[j] = 1
+                    j += 1
+        return Xt
 
 def load_balance_scale():
-    """ Load the Balance Scale dataset.
+    """Load the Balance Scale dataset.
     
     Contains only categorical attributes.
     
@@ -162,7 +161,7 @@ def load_balance_scale():
     return X, y
 
 def load_banknote_authentication():
-    """ Load the Banknote Authentication dataset.
+    """Load the Banknote Authentication dataset.
     
     Contains only numerical attributes.
     
@@ -175,7 +174,7 @@ def load_banknote_authentication():
     return X, y
 
 def load_blood_transfusion():
-    """ Load the Blood Transfusion dataset.
+    """Load the Blood Transfusion dataset.
     
     Contains only numerical attributes.
     
@@ -187,34 +186,8 @@ def load_blood_transfusion():
     X = df.drop(columns="class")
     return X, y
 
-def load_car_evaluation():
-    """ Load the Car Evaluation dataset.
-    
-    Contains only categorical attributes.
-    
-    https://archive.ics.uci.edu/ml/datasets/Car+Evaluation
-    """
-    names = ["buying","maint","doors","persons","lug_boot","safety","class"]
-    df = pd.read_csv("datasets/car.data", names=names)
-    y = df["class"]
-    X = df.drop(columns="class")
-    return X, y
-
-def load_chess():
-    """ Load the Chess (King-Rook vs. King-Pawn) dataset.
-    
-    Contains only categorical attributes.
-    
-    https://archive.ics.uci.edu/ml/datasets/Chess+%28King-Rook+vs.+King-Pawn%29
-    """
-    names = list("a{}".format(j+1) for j in range(36)) + ["class"]
-    df = pd.read_csv("datasets/kr-vs-kp.data", names=names)
-    y = df["class"]
-    X = df.drop(columns="class")
-    return X, y
-
 def load_climate_model_crashes():
-    """ Load the Climate Model Crashes dataset.
+    """Load the Climate Model Crashes dataset.
     
     Contains only numerical attributes.
     
@@ -226,7 +199,7 @@ def load_climate_model_crashes():
     return X, y
 
 def load_congressional_voting_records():
-    """ Load the Congressional Voting Records dataset.
+    """Load the Congressional Voting Records dataset.
     
     Contains only categorical attributes.
     
@@ -300,54 +273,6 @@ def load_ionosphere():
     y = df["class"]
     X = df.drop(columns="class")
     return X, y
-
-def load_monks_problems(problem_number):
-    """ Load the MONK's Problems dataset.
-    
-    Contains only categorical attributes. Test set is a "full" set of examples
-    and the training set is simply a subset of the test set.
-    
-    https://archive.ics.uci.edu/ml/datasets/MONK%27s+Problems
-    """
-    if problem_number not in {1, 2, 3}:
-        raise ValueError("problem_number must be 1, 2, or 3")
-    for t in ['train', 'test']:
-        filename = "datasets/monks-{}.{}".format(problem_number, t)
-        df = pd.read_csv(filename,
-                names=["class","a1","a2","a3","a4","a5","a6","Id"],
-                index_col="Id",
-                delim_whitespace=True)
-        y = df["class"]
-        X = df.drop(columns="class")
-        if t == 'train':
-            X_train, y_train = X, y
-        else:
-            X_test, y_test = X, y
-    return X_train, X_test, y_train, y_test
-
-def load_monks_problems_1():
-    """ Load the MONK's problem 1 dataset.
-    
-    Contains only categorical attributes. Test set is a "full" set of examples
-    and the training set is simply a subset of the test set.
-    """
-    return load_monks_problems(1)
-
-def load_monks_problems_2():
-    """ Load the MONK's problem 2 dataset.
-    
-    Contains only categorical attributes. Test set is a "full" set of examples
-    and the training set is simply a subset of the test set.
-    """
-    return load_monks_problems(2)
-
-def load_monks_problems_3():
-    """ Load the MONK's problem 3 dataset.
-    
-    Contains only categorical attributes. Test set is a "full" set of examples
-    and the training set is simply a subset of the test set.
-    """
-    return load_monks_problems(3)
 
 def load_parkinsons():
     """ Load the Parkinsons dataset.
