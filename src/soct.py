@@ -29,6 +29,17 @@ class SOCT(BaseEstimator, ClassifierMixin):
         Small constant used to enforce strict inequalities in branching
         hyperplanes.
     
+    init_cuts_nodes : list or {"root", "last", "all"}, default="all"
+        Which branch nodes to make initial cuts for.
+        
+        - If list, then `init_cuts_nodes` is the list of branch nodes.
+        - If "root", then `init_cuts_nodes=[1]`.
+        - If "last", then `init_cuts_nodes` is the list of branch nodes
+          whose children are leaf nodes in the perfect tree of depth
+          `max_depth`.
+        - If "all", then `init_cuts_nodes` is the list of all branch
+          nodes.
+    
     n_init_cuts : nonnegative int, default=0
         Number of initial cuts we attempt to find at each branch node
         per iteration (i.e., each time we solve the LP relaxation).
@@ -111,6 +122,7 @@ class SOCT(BaseEstimator, ClassifierMixin):
         ccp_alpha=0.0,
         max_splits=None,
         eps=0.005,
+        init_cuts_nodes="all",
         n_init_cuts=0,
         init_cuts_max_iter=None,
         benders_nodes=None,
@@ -126,6 +138,7 @@ class SOCT(BaseEstimator, ClassifierMixin):
         self.ccp_alpha = ccp_alpha
         self.max_splits = max_splits
         self.eps = eps
+        self.init_cuts_nodes = init_cuts_nodes
         self.n_init_cuts = n_init_cuts
         self.init_cuts_max_iter = init_cuts_max_iter
         self.benders_nodes = benders_nodes
@@ -227,6 +240,25 @@ class SOCT(BaseEstimator, ClassifierMixin):
         # eps
         if not (isinstance(self.eps, Real) and self.eps > 0.0):
             raise ValueError("eps must be a positive float.")
+        
+        # init_cuts_nodes
+        if (isinstance(self.init_cuts_nodes, list) and
+            set(self.init_cuts_nodes).issubset(branch_nodes)):
+            init_cuts_nodes = self.init_cuts_nodes
+        elif isinstance(self.init_cuts_nodes, str):
+            if self.init_cuts_nodes == "root":
+                init_cuts_nodes = [1]
+            elif self.init_cuts_nodes == "last":
+                init_cuts_nodes = list(range(2**(self.max_depth-1),
+                                             2**self.max_depth))
+            elif self.init_cuts_nodes == "all":
+                init_cuts_nodes = list(branch_nodes)
+            else:
+                raise ValueError("Invalid value for init_cuts_nodes. Allowed "
+                                 "string values are 'root', 'last', or 'all'.")
+        else:
+            raise ValueError("Invalid value for init_cuts_nodes.")
+        self.init_cuts_nodes_ = init_cuts_nodes
         
         # n_init_cuts
         if not (isinstance(self.n_init_cuts, Integral)
@@ -420,7 +452,7 @@ class SOCT(BaseEstimator, ClassifierMixin):
             found_cut = SOCT._add_cuts(
                 model.addConstr,
                 w_vals,
-                branch_nodes,
+                self.init_cuts_nodes_,
                 self.n_init_cuts
             )
         
