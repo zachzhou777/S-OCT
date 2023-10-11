@@ -45,7 +45,7 @@ class UnivariateDecisionTree:
             y[i] = self.label[t]
         return y
     
-    def to_perfect_tree(self, depth):
+    def to_perfect_tree(self, depth, default_left=True):
         """Extend the current tree to a perfect binary tree of a given depth.
         
         Perform changes in-place.
@@ -54,13 +54,16 @@ class UnivariateDecisionTree:
         ----------
         depth : int
             The desired depth of the perfect binary tree.
+        
+        default_left : bool
+            For newly introduced branch nodes, whether to send all samples left.
         """
         def recurse(root, label):
             if root >= 2**depth: # Check if subtree root is a leaf node
                 self.label[root] = label
             else:
                 self.feature[root] = 0
-                self.threshold[root] = float('inf')
+                self.threshold[root] = float('inf') if default_left else -float('inf')
                 recurse(2*root, label)
                 recurse(2*root+1, label)
         
@@ -116,7 +119,7 @@ class MultivariateDecisionTree:
             y[i] = self.label[t]
         return y
     
-    def to_perfect_tree(self, depth):
+    def to_perfect_tree(self, depth, default_left=True):
         """Extend the current tree to a perfect binary tree of a given depth.
         
         Perform changes in-place.
@@ -125,6 +128,9 @@ class MultivariateDecisionTree:
         ----------
         depth : int
             The desired depth of the perfect binary tree.
+        
+        default_left : bool
+            For newly introduced branch nodes, whether to send all samples left.
         """
         n_features = len(self.coef[1])
         
@@ -133,7 +139,7 @@ class MultivariateDecisionTree:
                 self.label[root] = label
             else:
                 self.coef[root] = np.zeros(n_features)
-                self.intercept[root] = float('inf')
+                self.intercept[root] = float('inf') if default_left else -float('inf')
                 recurse(2*root, label)
                 recurse(2*root+1, label)
         
