@@ -18,14 +18,20 @@ scikit-learn compatible transformers for performing bucketization, a
 preprocessing step needed by algorithms that assume binary features.
 
 The `CPAIOR2022` folder is here for archival purposes. It contains codes needed
-to run the experiments from the original
-[paper](https://doi.org/10.1007/978-3-031-08011-1_7).
+to run the experiments from our [CPAIOR 2022 paper](https://doi.org/10.1007/978-3-031-08011-1_7).
 
-The remaining files in this repo are scripts for performing various experiments
-using S-OCT, our reimplementations of OCT/OCT-H and FlowOCT, optimal
-classification trees from [Interpretable AI](https://www.interpretable.ai/),
-and [PyDL8.5](https://www.ijcai.org/Proceedings/2020/0750.pdf).
+The remaining code files in this repo are scripts to perform experiments in our
+[Constraints paper](https://doi.org/10.1007/s10601-023-09367-y).
+`parameter_tuning.py` runs the tuning experiments described in Section 6.1.1.
+The `*_mip.py` scripts run the direct MIP comparison described in Section 6.1.2;
+these scripts write results to `mip_comparison.csv`. The `*_comprehensive.py`
+scripts run the comprehensive comparison desribed in Section 6.1.3; these
+scripts write results to `comprehensive.csv`. In addition to the models in
+`src`, our experiments test optimal classification trees from
+[Interpretable AI](https://www.interpretable.ai/), and
+[PyDL8.5](https://www.ijcai.org/Proceedings/2020/0750.pdf).
 
-For full details of the S-OCT model, please see the original
-[paper](https://doi.org/10.1007/978-3-031-08011-1_7), Shattering Inequalities
-for Learning Optimal Decision Trees.
+### References
+1. Boutilier, J., Michini, C., Zhou, Z. (2022). *Shattering Inequalities for Learning Optimal Decision Trees.* Proceedings of CPAIOR 2022. [DOI:10.1007/978-3-031-08011-1_7](https://doi.org/10.1007/978-3-031-08011-1_7) (**Best paper award**)
+
+2. Boutilier, J., Michini, C., Zhou, Z. (2023). *Optimal multivariate decision trees.* Constraints. [DOI:10.1007/s10601-023-09367-y](https://doi.org/10.1007/s10601-023-09367-y)
